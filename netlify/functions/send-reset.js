@@ -1,65 +1,53 @@
-import nodemailer from "nodemailer";
+import { Resend } from 'resend';
+
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function handler(event) {
-  // ✅ CORS (لو هتستدعي من المتصفح)
-  const corsHeaders = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "content-type, authorization",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-  };
-  if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 204, headers: corsHeaders, body: "" };
-  }
-  if (event.httpMethod !== "POST") {
-    return { statusCode: 405, headers: corsHeaders, body: "Method Not Allowed" };
+  if (event.httpMethod !== 'POST') {
+    return { statusCode: 405, body: 'Method Not Allowed' };
   }
 
   try {
-    // ✅ حماية بسيطة: Bearer Token
-    const auth = event.headers.authorization || "";
-    const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-    if (!token || token !== process.env.EMAIL_SERVICE_TOKEN) {
-      return { statusCode: 401, headers: corsHeaders, body: "Unauthorized" };
+    const { email, token } = JSON.parse(event.body || '{}');
+
+    if (!email || !token) {
+      return {
+        statusCode: 400,
+        body: JSON.stringify({
+          success: false,
+          message: 'email and token are required',
+        }),
+      };
     }
 
-    const body = JSON.parse(event.body || "{}");
-    const { email, code, appName } = body;
+    const resetUrl = `https://darkfit.netlify.app/reset-password?token=${encodeURIComponent(
+      token
+    )}`;
 
-    if (!email || !code) {
-      return { statusCode: 400, headers: corsHeaders, body: "Missing email/code" };
-    }
-
-    // ✅ SMTP (Gmail)
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT || 587),
-      secure: false,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    });
-
-    const fromName = appName ? String(appName) : "Mohamed Apps";
-    const fromEmail = process.env.FROM_EMAIL || process.env.SMTP_USER;
-
-    await transporter.sendMail({
-      from: `${fromName} <${fromEmail}>`,
+    await resend.emails.send({
+      from: 'DarkFit <noreply@send.darkfit>', // غيّرها للإيميل من الدومين اللي فعلته في Resend
       to: email,
-      subject: "Reset your password",
-      text: `Your password reset code is: ${code}`,
+      subject: 'إعادة تعيين كلمة المرور - DarkFit',
+      html: `
+        <p>مرحباً،</p>
+        <p>اضغط على الرابط التالي لإعادة تعيين كلمة المرور:</p>
+        <p><a href="${resetUrl}">${resetUrl}</a></p>
+        <p>إذا لم تطلب إعادة تعيين، يمكنك تجاهل هذه الرسالة.</p>
+      `,
     });
 
     return {
       statusCode: 200,
-      headers: corsHeaders,
-      body: JSON.stringify({ ok: true }),
+      body: JSON.stringify({ success: true }),
     };
-  } catch (err) {
+  } catch (error) {
+    console.error(error);
     return {
       statusCode: 500,
-      headers: corsHeaders,
-      body: `Server error: ${err?.message || "unknown"}`,
+      body: JSON.stringify({
+        success: false,
+        message: error.message || 'Failed to send email',
+      }),
     };
   }
 }
